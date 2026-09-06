@@ -1,0 +1,19 @@
+# EEG dataset — downloaded locally, never committed (see README)
+mne_data/
+physionet_data/
+
+# Trained models and figures produced by mybci.py
+artifacts/
+
+# Personal exploration notebooks and working notes
+personal/
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# macOS
+.DS_Store
