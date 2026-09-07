@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Union
 
+import matplotlib as mpl
 import mne
 import numpy as np
 
@@ -22,6 +23,8 @@ DEFAULT_DURATION = 10.0
 PSD_FMAX = 60.0
 DEFAULT_FIGURE_DIR = _ROOT / "artifacts"
 TASK_NAMES = ("T1", "T2")
+_RDBU = mpl.colormaps["RdBu_r"]
+CLASS_COLORS = (_RDBU(0.12), _RDBU(0.88))  # scalp blue / red
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +43,7 @@ def _pick_channels(raw, requested: tuple[str, ...]) -> list[str]:
 
 def _class_labels(classes: np.ndarray) -> list[str]:
     return [
-        f"{TASK_NAMES[i]} (code {int(c)})" if i < len(TASK_NAMES) else f"code {int(c)}"
+        TASK_NAMES[i] if i < len(TASK_NAMES) else f"class {int(c)}"
         for i, c in enumerate(classes)
     ]
 
@@ -93,10 +96,28 @@ def _plot_psd(ax, raw, channels: list[str], title: str, band: tuple[float, float
     ax.legend(fontsize="x-small", loc="upper right")
 
 
-def _plot_csp_topographies(axes, csp: CSP, info) -> None:
+def _plot_csp_topographies(axes, csp: CSP, info):
+    """Scalp topomaps of W on a shared colour scale (λ falls left → right)."""
+    n = len(axes)
+    n_left = n // 2
+    vmax = float(np.max(np.abs(csp.filters_))) or 1.0
+    im = None
     for i, ax in enumerate(axes):
-        mne.viz.plot_topomap(csp.filters_[i], info, axes=ax, show=False)
-        ax.set_title(f"w{i + 1}\nλ={csp.eigenvalues_[i]:.2f}", fontsize="small")
+        im, _ = mne.viz.plot_topomap(
+            csp.filters_[i],
+            info,
+            axes=ax,
+            show=False,
+            vlim=(-vmax, vmax),
+            cmap="RdBu_r",
+        )
+        color = CLASS_COLORS[0] if i < n_left else CLASS_COLORS[1]
+        ax.set_title(
+            f"w{i + 1}\nλ={csp.eigenvalues_[i]:.2f}",
+            fontsize="small",
+            color=color,
+        )
+    return im
 
 
 def _plot_component_variance(ax, features, y, classes, labels) -> None:
@@ -107,7 +128,8 @@ def _plot_component_variance(ax, features, y, classes, labels) -> None:
         ax.bar(
             idx + (k - 0.5) * width,
             subset.mean(axis=0), width,
-            yerr=subset.std(axis=0), capsize=2, alpha=0.85, label=label,
+            yerr=subset.std(axis=0), capsize=2, label=label,
+            color=CLASS_COLORS[k], ecolor=CLASS_COLORS[k],
         )
     ax.set_xticks(idx)
     ax.set_xticklabels([f"w{i + 1}" for i in idx])
@@ -118,9 +140,11 @@ def _plot_component_variance(ax, features, y, classes, labels) -> None:
 
 def _plot_feature_scatter(ax, features, y, classes, labels) -> None:
     n = features.shape[1]
-    for code, label in zip(classes, labels):
+    for k, (code, label) in enumerate(zip(classes, labels)):
         s = features[y == code]
-        ax.scatter(s[:, 0], s[:, -1], s=30, alpha=0.8, label=label)
+        ax.scatter(
+            s[:, 0], s[:, -1], s=30, alpha=0.8, label=label, color=CLASS_COLORS[k],
+        )
     ax.set_xlabel("first component (w1)")
     ax.set_ylabel(f"last component (w{n})")
     ax.set_title("Class separation in the extreme components")
@@ -174,18 +198,56 @@ def csp_figure(
     print(f"  CSP: {X.shape[0]} epochs, {n_components} filters from {X.shape[1]} channels")
     print(f"  eigenvalues: {np.array2string(csp.eigenvalues_, precision=3, floatmode='fixed')}")
 
-    fig = plt.figure(figsize=(14, 7))
-    grid = fig.add_gridspec(2, n_components, height_ratios=[1.0, 1.4], hspace=0.45)
-    topo_axes = [fig.add_subplot(grid[0, i]) for i in range(n_components)]
-    ax_var = fig.add_subplot(grid[1, : n_components // 2])
-    ax_scatter = fig.add_subplot(grid[1, n_components // 2 :])
+    n_left = n_components // 2
+    n_right = n_components - n_left
+    width_ratios = [1.0] * n_left + [0.22] + [1.0] * n_right + [0.08]
+    ncols = n_components + 2
+    fig = plt.figure(figsize=(14.5, 8.2))
+    outer = fig.add_gridspec(2, 1, height_ratios=[1.2, 1.35], hspace=0.28)
+    scalp = outer[0].subgridspec(
+        3, ncols,
+        height_ratios=[0.18, 0.16, 1.0],
+        hspace=0.04,
+        wspace=0.22,
+        width_ratios=width_ratios,
+    )
+    charts = outer[1].subgridspec(
+        1, ncols,
+        wspace=0.22,
+        width_ratios=width_ratios,
+    )
 
-    _plot_csp_topographies(topo_axes, csp, info)
+    ax_section = fig.add_subplot(scalp[0, :-1])
+    ax_section.set_axis_off()
+    ax_section.set_title("CSP spatial filters", fontsize=12, pad=2)
+
+    ax_t1 = fig.add_subplot(scalp[1, :n_left])
+    ax_t2 = fig.add_subplot(scalp[1, n_left + 1 : -1])
+    ax_t1.set_axis_off()
+    ax_t2.set_axis_off()
+    ax_t1.set_title(labels[0], fontsize=13, fontweight="bold", color=CLASS_COLORS[0], pad=0)
+    if len(labels) > 1:
+        ax_t2.set_title(labels[1], fontsize=13, fontweight="bold", color=CLASS_COLORS[1], pad=0)
+
+    topo_axes = [fig.add_subplot(scalp[2, i]) for i in range(n_left)]
+    topo_axes += [fig.add_subplot(scalp[2, i + 1]) for i in range(n_left, n_components)]
+    ax_cbar = fig.add_subplot(scalp[2, -1])
+    ax_var = fig.add_subplot(charts[0, :n_left])
+    ax_scatter = fig.add_subplot(charts[0, n_left + 1 : -1])
+
+    im = _plot_csp_topographies(topo_axes, csp, info)
+    cbar = fig.colorbar(im, cax=ax_cbar)
+    cbar.set_label("w", rotation=0, labelpad=10)
+    cbar.ax.tick_params(labelsize="x-small")
+
     _plot_component_variance(ax_var, features, y, csp.classes_, labels)
     _plot_feature_scatter(ax_scatter, features, y, csp.classes_, labels)
 
     run_part = ", ".join(f"R{r:02d}" for r in runs)
-    fig.suptitle(f"S{subject:03d} {run_part} — CSP ({X.shape[0]} epochs, in-sample)")
+    fig.suptitle(
+        f"S{subject:03d} {run_part} — CSP ({X.shape[0]} epochs, in-sample)",
+        y=0.98,
+    )
 
     _save_figure(fig, save_path)
 
