@@ -11,6 +11,17 @@ plugs directly into `sklearn.pipeline.Pipeline` and `cross_val_score`.
 Dataset: [EEG Motor Movement/Imagery Dataset](https://physionet.org/content/eegmmidb/1.0.0/)
 (EEGMMIDB) from PhysioNet — 109 subjects, 64 channels, 160 Hz.
 
+The EDF annotations are `T0` (rest, unused), `T1` and `T2`. What T1/T2 mean
+depends on the run ([PhysioNet](https://physionet.org/content/eegmmidb/1.0.0/)):
+
+| Runs        | T1              | T2              |
+| ----------- | --------------- | --------------- |
+| 1, 2        | — (baseline)    | — (baseline)    |
+| 3, 7, 11    | left fist       | right fist      |
+| 4, 8, 12    | imagine left    | imagine right   |
+| 5, 9, 13    | both fists      | both feet       |
+| 6, 10, 14   | imagine fists   | imagine feet    |
+
 ## Setup
 
 Python 3.14 was used for the reported results. Create a virtualenv and install
